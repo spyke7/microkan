@@ -4,6 +4,7 @@
 #include <deque>
 #include <functional>
 #include <deque>
+#include <string>
 
 class NeuronPool;
 
@@ -11,10 +12,12 @@ class Neuron
 {
 public:
     double data;
-    const char *op = "";
-    double grad;
+    std::string op = "";
+    double grad=0.0;
+    std::string label;
     std::vector<Neuron *> prev;
     NeuronPool* npool;
+    // std::function<void(Neuron&)> backward_fn; 
 
     Neuron(double data, std::vector<Neuron *> prev = {}, const char *op = ""){
         this->data = data;
@@ -34,9 +37,13 @@ public:
         return pool.back();
     }
 
-private:
+    void backward();
     std::deque<Neuron> pool;
 };
 
 Neuron& operator+(Neuron& a, Neuron& b);
 Neuron& operator*(Neuron& a, Neuron& b);
+
+// activation functions
+Neuron& tanh(Neuron& a);
+Neuron& silu(Neuron &a);

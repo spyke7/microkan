@@ -1,0 +1,31 @@
+digraph {
+  rankdir=LR;
+  n0x10173a0 [shape=record, label="{ a | data 5 | grad 50 }"];
+  n0x10173f0 [shape=record, label="{ b | data 3 | grad 89 }"];
+  n0x1017440 [shape=record, label="{ c | data 2 | grad 62 }"];
+  n0x1017490 [shape=record, label="{ d | data 15 | grad 11 }"];
+  n0x1017490op [label="*"];
+  n0x1017490op -> n0x1017490;
+  n0x10174e0 [shape=record, label="{ e | data 6 | grad 17 }"];
+  n0x10174e0op [label="*"];
+  n0x10174e0op -> n0x10174e0;
+  n0x1017530 [shape=record, label="{ f | data 17 | grad 11 }"];
+  n0x1017530op [label="+"];
+  n0x1017530op -> n0x1017530;
+  n0x1017588 [shape=record, label="{ g | data 11 | grad 17 }"];
+  n0x1017588op [label="+"];
+  n0x1017588op -> n0x1017588;
+  n0x10175d8 [shape=record, label="{ h | data 187 | grad 1 }"];
+  n0x10175d8op [label="*"];
+  n0x10175d8op -> n0x10175d8;
+  n0x10173a0 -> n0x1017490op;
+  n0x10173f0 -> n0x1017490op;
+  n0x10173f0 -> n0x10174e0op;
+  n0x1017440 -> n0x10174e0op;
+  n0x1017490 -> n0x1017530op;
+  n0x1017440 -> n0x1017530op;
+  n0x10173a0 -> n0x1017588op;
+  n0x10174e0 -> n0x1017588op;
+  n0x1017588 -> n0x10175d8op;
+  n0x1017530 -> n0x10175d8op;
+}

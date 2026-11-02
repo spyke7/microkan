@@ -1,13 +1,13 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra
 
-main: main.cpp src/engine.cpp headers/engine.hpp
-	$(CXX) $(CXXFLAGS) main.cpp src/engine.cpp -o main
+main: main.cpp src/engine.cpp src/graph.cpp headers/engine.hpp headers/graph.hpp
+	$(CXX) $(CXXFLAGS) main.cpp src/engine.cpp src/graph.cpp -o main
 
 run: main
 	./main
 
-clean:
-	rm -f main
+graph: main
+	dot -Tsvg out/graph3.dot -o out/graph3.svg
 
-.PHONY: run clean
+.PHONY: run graph
