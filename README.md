@@ -17,7 +17,7 @@ Built to explore the mechanics of KANs, computational graphs, automatic differen
 4. [Docs](#5-docs)
 5. [Visualization and Flow](#5-visualization-and-flow)
 6. [Benchmark vs micrograd](#6-benchmark-vs-micrograd)
-7. [How to use?](#7-how-to-use?)
+7. [How to use?](#7-how-to-use)
 8. [Known limitations and bugs](#8-known-limitations-and-bugs)
 9. [References](#9-references)
 
@@ -73,7 +73,7 @@ Notation used below (and in the code):
 Every continuous `f : [0,1]ⁿ → ℝ` can be written as
 
 $$
-f(\mathbf{x}) = f(x_1,\dots,x_n) = \sum_{q=1}^{2n+1} \Phi_q\!\left(\sum_{p=1}^{n} \varphi_{q,p}(x_p)\right)
+f(\mathbf{x}) = f(x_1,\dots,x_n) = \sum_{q=1}^{2n+1} \Phi_q\left(\sum_{p=1}^{n} \varphi_{q,p}(x_p)\right)
 $$
 
 with continuous one-variable functions `φ_{q,p}` and `Φ_q`. A KAN **learns** those functions.
@@ -460,7 +460,7 @@ loss below 0.1, `test mse` = median test error, `worst` = worst test error over 
 
 ---
 
-## 7. How to use?
+## 7. How to use
 
 - Clone the repo
 - Make a main.cpp in the root
