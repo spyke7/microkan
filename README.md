@@ -74,7 +74,7 @@ Every continuous `f : [0,1]ⁿ → ℝ` can be written as
 
 $$
 f(\mathbf{x}) = f(x_1,\dots,x_n) = \sum_{q=1}^{2n+1} \Phi_q\!\left(\sum_{p=1}^{n} \varphi_{q,p}(x_p)\right)
-$$,
+$$
 
 with continuous one-variable functions `φ_{q,p}` and `Φ_q`. A KAN **learns** those functions.
 (In the code, indices are 0-based: `p ∈ {0,1}`, `q ∈ {0,…,4}`.)
@@ -121,8 +121,8 @@ $$
 ### SiLU and its derivative
 
 $$
-\operatorname{silu}(x)=x\,\sigma(x)=\frac{x}{1+e^{-x}},\qquad
-\operatorname{silu}'(x)=\sigma(x)\bigl(1+x\,(1-\sigma(x))\bigr)
+\mathrm{silu}(x)=x\,\sigma(x)=\frac{x}{1+e^{-x}},\qquad
+\mathrm{silu}'(x)=\sigma(x)\bigl(1+x\,(1-\sigma(x))\bigr)
 $$
 
 (`silu(Neuron&)` in `engine.cpp`, `silu_prime` in `kan.cpp`.)
@@ -132,7 +132,7 @@ $$
 Every edge function (inner `φ` and outer `Φ`) has the same form:
 
 $$
-\varphi(x)=c\cdot\operatorname{silu}(x)+\sum_{j=0}^{K-1} w_j\,B_{j,k}(x)
+\varphi(x)=c\cdot\mathrm{silu}(x)+\sum_{j=0}^{K-1} w_j\,B_{j,k}(x)
 $$
 
 * `c` is one scalar (the "base"/residual weight),
@@ -145,7 +145,7 @@ This is the KAN paper's `φ(x) = w_b·silu(x) + w_s·spline(x)` with `w_s` absor
 Inner (first) layer, one function per (input `p`, hidden node `q`) pair, `n·m = 10` in total:
 
 $$
-\varphi_{p,q}(x_p)=c1_{p,q}\operatorname{silu}(x_p)+\sum_{j=0}^{K-1} w^{\text{in}}_{p,q,j}\,B_{j,k}(x_p)
+\varphi_{p,q}(x_p)=c1_{p,q}\mathrm{silu}(x_p)+\sum_{j=0}^{K-1} w^{\text{in}}_{p,q,j}\,B_{j,k}(x_p)
 $$
 
 Hidden nodes just add:
@@ -157,7 +157,7 @@ $$
 Outer (second) layer, one function per hidden node (5 in total):
 
 $$
-\Phi_q(h_q)=c2_q\operatorname{silu}(h_q)+\sum_{j=0}^{K-1} w^{\text{out}}_{j}\,B^{\text{out}}_{j,k}(h_q)
+\Phi_q(h_q)=c2_q\mathrm{silu}(h_q)+\sum_{j=0}^{K-1} w^{\text{out}}_{j}\,B^{\text{out}}_{j,k}(h_q)
 $$
 
 The output is the sum:
@@ -271,8 +271,8 @@ Because `prev.size() == 1`, only `local_grad[0]` is consumed by `backward`. Ever
 left for the training loop, which reads it **after** `backward` has filled `phi.grad`:
 
 $$
-\frac{\partial L}{\partial c}=\texttt{phi.grad}\cdot\texttt{local\_grad[1]},\qquad
-\frac{\partial L}{\partial w_j}=\texttt{phi.grad}\cdot\texttt{local\_grad[2+j]}
+\frac{\partial L}{\partial c}=\frac{\partial L}{\partial \varphi}\cdot\mathrm{silu}(x),\qquad
+\frac{\partial L}{\partial w_j}=\frac{\partial L}{\partial \varphi}\cdot B_{j,k}(x)
 $$
 
 This avoids re-evaluating the splines during the backward pass: they were already evaluated in the
