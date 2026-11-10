@@ -1,4 +1,5 @@
 # microkan
+![Thumbnail](thumbnail.png)
 
 A **Kolmogorov–Arnold Network (KAN)** written from scratch in C++, featuring a tiny reverse-mode automatic differentiation engine inspired by Andrej Karpathy's
 [micrograd](https://github.com/karpathy/micrograd) and hand-written B-splines.
