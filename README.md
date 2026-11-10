@@ -388,6 +388,8 @@ To sum it up this is how the layers are made -
 - Finally, the outer layer phis are added to give the predicted y.
 
 *Below is a sample graph, here hidden neurons are also shown*
+![MicroKAN Graph](out/graph_test.svg)
+This is created from `test.cpp` when the prediction is being done. 
 
 ---
 
