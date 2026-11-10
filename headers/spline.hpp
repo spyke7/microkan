@@ -2,6 +2,7 @@
 #include <vector>
 
 class Spline{
+public:
     int G;
     int k;
     double a,b; 
@@ -14,7 +15,7 @@ class Spline{
         this->a=a;
         this->b=b;
         this->h = (b-a)/G;
-        for (size_t i{0}; i<=G+2*k; i++){
+        for (int i=0; i<=G+2*k; i++){
             this->t.push_back(a+(i-k)*this->h);
         }
     }

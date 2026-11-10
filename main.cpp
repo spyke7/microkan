@@ -1,44 +1,48 @@
 #include <iostream>
+#include <vector>
 #include "headers/engine.hpp"
 #include "headers/graph.hpp"
+#include "headers/kan.hpp"
 
 int main()
 {
-    NeuronPool neuronpool;
+    NeuronPool npool;
 
-    // Neuron &a = neuronpool.append(Neuron(5));
-    // Neuron &b = neuronpool.append(Neuron(3));
-    // Neuron &c = neuronpool.append(Neuron(2));
-    // Neuron &d = a*b;
-    // Neuron &e = b*c;
-    // Neuron &f = d+c;
-    // Neuron &g = a+e;
-    // Neuron &h = g*f;
-    // a.label = "a";
-    // b.label = "b";
-    // c.label = "c";
-    // f.label = "f";
-    // d.label = "d";
-    // e.label = "e";
-    // g.label = "g";
-    // h.label = "h";
+    // n*(2n+1) = 10 rows, each of length G+k = 5
+    std::vector<std::vector<double>> w_in = {
+        {0.1, 0.2, 0.3, 0.4, 0.5}, {0.4, 0.5, 0.6, 0.7, 0.8}, {0.7, 0.8, 0.9, 0.1, 0.2}, {0.2, 0.3, 0.4, 0.5, 0.6}, {0.5, 0.6, 0.7, 0.8, 0.9}, {0.3, 0.4, 0.5, 0.6, 0.7}, {0.6, 0.7, 0.8, 0.9, 0.1}, {0.9, 0.1, 0.2, 0.3, 0.4}, {0.1, 0.3, 0.5, 0.7, 0.9}, {0.2, 0.4, 0.6, 0.8, 0.1}};
+    std::vector<double> c1 = {0.5, 0.6, 0.7, 0.8, 0.9, 0.4, 0.3, 0.2, 0.1, 0.5};
 
-    Neuron &x1=neuronpool.append(Neuron(2.0)); x1.label = "x1";
-    Neuron &x2 = neuronpool.append(Neuron(0.0)); x2.label = "x2";
-    Neuron &w1=neuronpool.append(Neuron(-3.0)); w1.label = "w1";
-    Neuron &w2=neuronpool.append(Neuron(1.0)); w2.label = "w2";
+    // shared across the outer phis, so G+k = 5 entries
+    std::vector<double> w_out = {0.1, 0.2, 0.3, 0.4, 0.5};
+    std::vector<double> c2 = {0.2, 0.3, 0.4, 0.5, 0.6};
 
-    Neuron &b=neuronpool.append(Neuron(6.8813735870195432)); b.label = "b";
+    KAN kan(2, 3, -2.0, 2.0, npool);
 
-    Neuron &x1w1 = x1*w1; x1w1.label="x1*w1";
-    Neuron &x2w2 = x2*w2; x2w2.label="x2*w2";
-    Neuron &x1w1x2w2 = x1w1+x2w2; x1w1x2w2.label = "x1*w1 + x2*w2";
-    Neuron &n = x1w1x2w2 + b; n.label = "n";
-    Neuron &o = tanh(n); o.label= "o";
-    o.grad=1;
+    // training data: y = 3x^2 + 7x + 2, the same x goes into both inputs
+    std::vector<std::vector<double>> X;
+    std::vector<double> Y;
+    for (double a = -1.0; a <= 1.0; a += 0.25)
+    {
+        X.push_back({a, a});
+        Y.push_back(3 * a * a + 7 * a + 2);
+    }
 
-    neuronpool.backward();
-    save_dot(neuronpool, "out/graph3.dot");
+    // graph 1: before training
+    double p0 = kan.forward(X[0], w_in, c1, w_out, c2);
+    npool.backward(2.0 * (p0 - Y[0])); // d(pred-y)^2/dpred as the seed
+    save_dot(npool, "out/graph_first.dot");
 
+    kan.train(X, Y, 0.02, 50, w_in, c1, w_out, c2);
+
+    // graph 2: after training (last sample)
+    double pl = kan.forward(X.back(), w_in, c1, w_out, c2);
+    npool.backward(2.0 * (pl - Y.back()));
+    save_dot(npool, "out/graph_last.dot");
+
+    // graph 3: test on an unseen point
+    double pt = kan.forward({0.53, 0.53}, w_in, c1, w_out, c2);
+    std::cout << "test pred " << pt << " true " << 3 * 0.53 * 0.53 + 7 * 0.53 + 2 << "\n";
+    save_dot(npool, "out/graph_test.dot");
     return 0;
 }

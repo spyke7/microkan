@@ -23,8 +23,10 @@ double Spline::coxDeBoor(int j, int p, double x)
 double Spline::spline_value(const std::vector<double> &c, double x)
 {
     double s = 0;
-    for (size_t i{0}; i < G + k; i++)
+    for (int i=0; i < G + k; i++)
     {
         s+=c[i]*coxDeBoor(i,k,x);
     }
+    
+    return s;
 }

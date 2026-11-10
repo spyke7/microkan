@@ -16,6 +16,7 @@ public:
     double grad=0.0;
     std::string label;
     std::vector<Neuron *> prev;
+    std::vector<double> local_grad;
     NeuronPool* npool;
     // std::function<void(Neuron&)> backward_fn; 
 
@@ -37,7 +38,7 @@ public:
         return pool.back();
     }
 
-    void backward();
+    void backward(double seed);
     std::deque<Neuron> pool;
 };
 
