@@ -1,2 +1,4 @@
 testsuite/micrograd
 Makefile
+main.cpp
+main.exe
