@@ -1,17 +1,17 @@
 #include "../headers/spline.hpp"
+#include <algorithm>
 
 double Spline::coxDeBoor(int j, int p, double x)
 {
+    x = std::min(std::max(x, t[k]), t[G + k]);
     if (p == 0)
     {
-        if (x >= t[j] && x < t[j + 1])
-        {
-            return 1;
-        }
-        else
-        {
-            return 0;
-        }
+        if (j < k || j >= G + k)
+            return 0.0;    
+        bool last = (j == G + k - 1);           
+        if (x >= t[j] && (x < t[j + 1] || (last && x <= t[j + 1]))) 
+            return 1.0;
+        return 0.0;
     }
     else
     {

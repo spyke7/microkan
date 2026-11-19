@@ -17,15 +17,16 @@ int main(int argc, char **argv)
     auto rnd = [&]() { return 2.0 * (rng() / 4294967296.0) - 1.0; };
 
     NeuronPool npool;
-    std::vector<std::vector<double>> w_in(10, std::vector<double>(5));
+    std::vector<std::vector<double>> w_in(10, std::vector<double>(5)), w_out(5, std::vector<double>(5));
     for (auto &row : w_in)
         for (double &v : row)
             v = rnd();
-    std::vector<double> c1(10), w_out(5), c2(5);
+    std::vector<double> c1(10), c2(5);
     for (double &v : c1)
         v = rnd();
-    for (double &v : w_out)
-        v = rnd();
+    for (auto &row : w_out)
+        for (double &v : row)
+            v = rnd();
     for (double &v : c2)
         v = rnd();
     KAN kan(2, 3, -2.0, 2.0, npool);

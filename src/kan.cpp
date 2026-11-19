@@ -3,6 +3,8 @@
 // derivative of the basis function B_{j,k}(x)
 static double dB(Spline &s, int j, double x)
 {
+    if (x < s.t[s.k] || x > s.t[s.G + s.k])
+        return 0.0;
     int k = s.k;
     return k * (s.coxDeBoor(j, k - 1, x) / (s.t[j + k] - s.t[j]) - s.coxDeBoor(j + 1, k - 1, x) / (s.t[j + k + 1] - s.t[j + 1]));
 }
@@ -14,7 +16,7 @@ static double silu_prime(double x)
 }
 
 KAN::KAN(int G, int k, double a, double b, NeuronPool &npool)
-    : spline(G, k, a, b), npool(npool) {}
+    : spline(G, k, a, b), outer_spline(G, k, a, b), npool(npool) {}
 
 void KAN::compute_first_layer(const std::vector<std::vector<double>> &w_in, const std::vector<double> &c1)
 {
@@ -61,53 +63,77 @@ void KAN::compute_first_layer(const std::vector<std::vector<double>> &w_in, cons
 
 void KAN::compute_hidden_neurons()
 {
-    for (size_t j = nparams; j <= 2 * nparams + 2; j++)
+    const size_t n = nparams;
+    const size_t Q = 2 * n + 1;
+
+    for (size_t q = 0; q < Q; q++)
     {
-        Neuron &h = npool.pool[j] + npool.pool[j + 2 * nparams + 1];
-        hidden_layer.push_back(&h);
+        Neuron *acc = &npool.pool[n + q];
+        for (size_t i = 1; i < n; i++)
+            acc = &(*acc + npool.pool[n + i * Q + q]);
+        hidden_layer.push_back(acc);
     }
 }
 
-void KAN::compute_outer_layer(const std::vector<double> &w_out, const std::vector<double> &c2)
+void KAN::update_outer_grid(const std::vector<std::vector<double>> &X,
+                            const std::vector<std::vector<double>> &w_in,
+                            const std::vector<double> &c1,
+                            double margin)
 {
-    std::vector<std::vector<double>> Bvalues;
-    double maxEl = std::numeric_limits<double>::lowest(), minEl = std::numeric_limits<double>::max();
-    
-    for (size_t i = 0; i < hidden_layer.size(); i++)
+    double lo = std::numeric_limits<double>::max();
+    double hi = std::numeric_limits<double>::lowest();
+
+    for (const auto &x : X)
     {
-        maxEl = std::max(maxEl, (*hidden_layer[i]).data);
-        minEl = std::min(minEl, (*hidden_layer[i]).data);
+        npool.pool.clear();
+        for (double v : x)
+            npool.append(Neuron(v));
+        hidden_layer.clear();
+
+        compute_first_layer(w_in, c1);
+        compute_hidden_neurons();
+
+        for (Neuron *h : hidden_layer)
+        {
+            lo = std::min(lo, h->data);
+            hi = std::max(hi, h->data);
+        }
     }
 
-    Spline outer_splines(spline.G, spline.k, minEl, maxEl);
-
-    for (size_t i = 0; i < hidden_layer.size(); i++)
+    double w = hi - lo;
+    if (w < 1e-6)                        // degenerate: all values equal
     {
-        std::vector<double> temp;
-        for (size_t j = 0; j < spline.G + spline.k; j++)
-        {
-            double B = outer_splines.coxDeBoor(j, spline.k, (*hidden_layer[i]).data);
-            temp.push_back(B);
-        }
-
-        Bvalues.push_back(temp);
+        double mid = 0.5 * (lo + hi);
+        lo = mid - 0.5;
+        hi = mid + 0.5;
+        w = 1.0;
     }
+    outer_spline = Spline(spline.G, spline.k, lo - margin * w, hi + margin * w);
+}
 
-    for (size_t i = 0; i < hidden_layer.size(); i++)
+void KAN::compute_outer_layer(const std::vector<std::vector<double>> &w_out, const std::vector<double> &c2)
+{
+    const size_t nb = spline.G + spline.k;
+
+    for (size_t q = 0; q < hidden_layer.size(); q++)
     {
-        Neuron &phi_outer = silu(*hidden_layer[i]);
-        double s = phi_outer.data;
-        double d = c2[i] * silu_prime((*hidden_layer[i]).data);
-        phi_outer.data *= c2[i];
-        for (size_t j = 0; j < spline.G + spline.k; j++)
+        Neuron &h = *hidden_layer[q];
+        Neuron &phi = silu(h);
+        double s = phi.data;
+        double d = c2[q] * silu_prime(h.data);
+        phi.data *= c2[q];
+
+        std::vector<double> B(nb);
+        for (size_t m = 0; m < nb; m++)
         {
-            phi_outer.data += w_out[j] * Bvalues[i][j];
-            d += w_out[j] * dB(outer_splines, j, (*hidden_layer[i]).data);
+            B[m] = outer_spline.coxDeBoor(m, spline.k, h.data);
+            phi.data += w_out[q][m] * B[m];
+            d += w_out[q][m] * dB(outer_spline, m, h.data);
         }
-        phi_outer.op = "spline";
-        phi_outer.local_grad = {d,s};
-        phi_outer.local_grad.insert(phi_outer.local_grad.end(), Bvalues[i].begin(), Bvalues[i].end());
-        outer_layer.push_back(&phi_outer);
+        phi.op = "spline";                      
+        phi.local_grad = {d, s};
+        phi.local_grad.insert(phi.local_grad.end(), B.begin(), B.end());
+        outer_layer.push_back(&phi);
     }
 }
 
@@ -124,7 +150,7 @@ void KAN::output()
     Neuron &out = sum(sum, 0);
 }
 
-double KAN::forward(const std::vector<double> &x, const std::vector<std::vector<double>> &w_in, const std::vector<double> &c1, const std::vector<double> &w_out, const std::vector<double> &c2)
+double KAN::forward(const std::vector<double> &x, const std::vector<std::vector<double>> &w_in, const std::vector<double> &c1, const std::vector<std::vector<double>> &w_out, const std::vector<double> &c2)
 {
     npool.pool.clear();
     for (double v : x)
@@ -139,7 +165,7 @@ double KAN::forward(const std::vector<double> &x, const std::vector<std::vector<
     return npool.pool.back().data;
 }
 
-void KAN::train(const std::vector<std::vector<double>> &X, const std::vector<double> &Y, double lr, int steps, std::vector<std::vector<double>> &w_in, std::vector<double> &c1, std::vector<double> &w_out, std::vector<double> &c2)
+void KAN::train(const std::vector<std::vector<double>> &X, const std::vector<double> &Y, double lr, int steps, std::vector<std::vector<double>> &w_in, std::vector<double> &c1, std::vector<std::vector<double>> &w_out, std::vector<double> &c2)
 {
     for (int step = 0; step < steps; step++)
     {
@@ -167,8 +193,8 @@ void KAN::train(const std::vector<std::vector<double>> &X, const std::vector<dou
             {
                 Neuron &phi = *outer_layer[i];
                 c2[i] -= lr * phi.grad * phi.local_grad[1];
-                for (size_t j = 0; j < w_out.size(); j++)
-                    w_out[j] -= lr * phi.grad * phi.local_grad[2 + j];
+                for (size_t j = 0; j < w_out[i].size(); j++)
+                    w_out[i][j] -= lr * phi.grad * phi.local_grad[2 + j];
             }
         }
         std::cout << "step " << step << " loss " << total / X.size() << "\n";
