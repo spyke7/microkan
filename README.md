@@ -111,6 +111,52 @@ $$
 Properties used implicitly: each `B_{j,k}` is non-negative, supported on `[t_j, t_{j+k+1})`, and on
 `[a, b)` the `K` functions sum to 1 (partition of unity).
 
+### How `coxDeBoor` is computed: textbook recursion vs. triangle table
+
+The formula above is the same in both versions. Only the order of evaluation differs.
+
+**Textbook version (our first implementation).** Direct recursion: `B_{j,p}` calls `B_{j,p-1}` and
+`B_{j+1,p-1}`, and so on down to degree 0. The same sub-values are recomputed again and again, and
+every bump is asked separately, even the ones that are 0 at `x`. For `G=2, k=3, x=0.5`, a single call
+`B_{2,3}(x)` makes 15 recursive calls. For one input of the `[2,5,1]` network the code needed 425 calls
+(75 for the 5 basis values, 350 for the derivatives, which call it again for every edge).
+
+**Current version (triangle table).** At `x`, only `k+1` bumps are non-zero: the ones numbered
+`s-k … s`, where `s = span(x)` is the knot interval containing `x`. The first call for a given `x`
+builds, bottom-up, a table with those bumps for every degree `0…k`, using the same formula
+(example: `G=2, k=3, x=0.5`, so `s=4`):
+
+```
+degree 0:                    B4=1
+degree 1:               B3=0.75    B4=0.25
+degree 2:          B2=0.281   B3=0.688   B4=0.031
+degree 3:     B1=0.070   B2=0.612   B3=0.315   B4=0.003      (B0 = 0)
+```
+
+Each entry is made from the two entries above it. Later `coxDeBoor(j, p, x)` calls for the same `x`
+(the loop over `j`, and the two calls inside `dB`) just read the table, and a bump outside the triangle
+returns 0 directly. The 425 calls above become one 10-entry table plus lookups.
+
+| | Textbook recursion | Triangle table |
+|---|---|---|
+| Direction | top-down | bottom-up |
+| Repeated sub-values | recomputed | computed once |
+| Bumps that are 0 at `x` | recursed into | skipped |
+| Cost | grows exponentially with `k`, per bump | `O(k²)` once per `x` |
+| Result | | identical (same formula and operand order, so training gives the same loss digit for digit) |
+
+**Where the idea comes from.** Evaluating only the non-vanishing basis functions with a triangular
+scheme is the standard method in the B-spline literature: Piegl & Tiller, *The NURBS Book*, Chapter 2,
+Section 2.5 "Computational Algorithms": Algorithm A2.1 (`FindSpan`, locates the knot interval) and
+Algorithm A2.2 (`BasisFuns`, computes the `p+1` non-zero basis functions). De Boor's *A Practical Guide
+to Splines* describes the same scheme. Our version differs from A2.2 in two ways:
+
+* A2.2 updates one array in place (with `left`/`right` knot distances) and discards the lower degrees. We
+  keep the whole triangle and the textbook formula, so `coxDeBoor(j, p, x)` can answer any degree `p`
+  (`dB` needs degree `k-1`).
+* `FindSpan` uses a binary search for general knots. Our knots are uniform, so `span` is one division
+  (plus a two-line fix for rounding when `x` lies exactly on a knot).
+
 ### Derivative of a basis function
 
 $$
@@ -171,9 +217,9 @@ Two implementation choices to know about:
 
 1. **`w_out` is shared** by all 5 outer functions (only `c2_q` differs per `q`). The paper gives each
    `Φ_q` its own coefficients; sharing here keeps the parameter count small.
-2. **The outer grid is data-dependent.** The spline `B^out` is rebuilt on every forward pass on the
-   range `[min_q h_q, max_q h_q]`, because hidden values have no fixed range. The inner grid is fixed
-   at `[a, b]`.
+2. **The outer grid is data-dependent.** The spline `B^out` lives on the range of the hidden values
+   `h_q` over the training inputs (plus a 10% margin), set by `update_outer_grid`. The inner grid
+   is fixed at `[a, b]`.
 
 ### Loss
 
@@ -289,8 +335,10 @@ forward pass.
 |---|---|
 | `int G, k; double a, b, h;` | number of intervals, degree, range, spacing `h = (b-a)/G` |
 | `std::vector<double> t` | knot vector, `t[i] = a + (i-k)·h` for `i = 0..G+2k` |
-| `Spline(G, k, a, b)` | stores the parameters and builds `t` (formula 3.2) |
-| `double coxDeBoor(int j, int p, double x)` | evaluates `B_{j,p}(x)` by the recursion in 3.3 (recursive, no caching) |
+| `Spline(G, k, a, b)` | stores the parameters, builds `t` (formula 3.2) and allocates the table `tri` |
+| `double coxDeBoor(int j, int p, double x)` | returns `B_{j,p}(x)`. The first call for a given `x` fills a small table with all non-zero basis values of degrees `0..k` (the recursion in 3.3, built bottom-up); later calls for the same `x` just read the table |
+| `int span(double x)` | index `s` with `t[s] ≤ x < t[s+1]` (`x` is clamped to `[a, b]`); only the `k+1` bumps `s-k … s` can be non-zero at `x` |
+| `tri`, `tri_x`, `tri_s`, `tri_valid` | that table, the `x` it was built for, its interval, and whether it is filled |
 | `double spline_value(const vector<double>& c, double x)` | evaluates `Σ_{i<G+k} c[i]·B_{i,k}(x)`, a plain spline with coefficients `c` (a helper; the KAN itself inlines this sum) |
 
 ### `headers/engine.hpp` + `src/engine.cpp`: the autograd engine
@@ -321,9 +369,9 @@ pool), `size_t nparams` (= number of inputs, 2), `vector<Neuron*> hidden_layer`,
 | `static double dB(Spline&, j, x)` | derivative of `B_{j,k}` (formula 3.4) |
 | `static double silu_prime(x)` | `σ(x)(1 + x(1−σ(x)))` (formula 3.5) |
 | `KAN(G, k, a, b, npool)` | builds the inner `Spline` and stores the pool reference |
-| `compute_first_layer(w_in, c1)` | For each input `p` it evaluates all `K` basis values `B_j(x_p)` once. Then for each of the 5 hidden targets `q` it creates one spline neuron `φ_{p,q}`: starts from `silu(x_p)` (kept as `s`), multiplies by `c1[idx]`, adds `Σ w_in[idx][j]·B_j`, accumulates the derivative `d`, and fills `local_grad = {d, s, B_0..B_{K-1}}`, `op = "spline"`, `label = "Φp,q"` |
+| `compute_first_layer(w_in, c1)` | For each input `p` it finds the interval of `x_p` with `span` and evaluates the `k+1` non-zero basis values and their derivatives once (the other `K-(k+1)` are 0). Then for each of the 5 hidden targets `q` it creates one spline neuron `φ_{p,q}`: starts from `silu(x_p)` (kept as `s`), multiplies by `c1[idx]`, adds `Σ w_in[idx][j]·B_j` over those `k+1` bumps, accumulates the derivative `d`, and fills `local_grad = {d, s, B_0..B_{K-1}}`, `op = "spline"`, `label = "Φp,q"` |
 | `compute_hidden_neurons()` | creates the 5 hidden neurons `h_q = φ_{0,q} + φ_{1,q}` with the `+` operator (its two parents are `pool[nparams+q]` and `pool[nparams+q+2n+1]`) and stores pointers in `hidden_layer` |
-| `compute_outer_layer(w_out, c2)` | finds `min`/`max` of the hidden values, builds a **new** `Spline` on `[min, max]`, evaluates its basis at every `h_q`, then creates the 5 outer spline neurons `Φ_q` exactly like the inner ones (`c2[q]`, shared `w_out`) and stores pointers in `outer_layer` |
+| `compute_outer_layer(w_out, c2)` | uses outer_spline (set by update_outer_grid), evaluates the `k+1` non-zero basis values at every `h_q`, then creates the 5 outer spline neurons `Φ_q` exactly like the inner ones (`c2[q]`, shared `w_out`) and stores pointers in `outer_layer` |
 | `output()` | sums the 5 outer neurons with a right-nested chain of `+` (`Φ0 + (Φ1 + (Φ2 + (Φ3 + Φ4)))`, 4 `+` neurons). The last neuron of the pool is the network output |
 | `double forward(x, w_in, c1, w_out, c2)` | `pool.clear()`, re-creates the input neurons, runs the four steps above, returns `pool.back().data` |
 | `train(X, Y, lr, steps, w_in, c1, w_out, c2, verbose=true)` | per-sample SGD, see [section 7](#7-how-training-works). Returns the mean loss of each epoch; prints `step i loss L` only if `verbose` |
@@ -423,18 +471,18 @@ python compare.py
 task: y=3x^2+7x+2, 9 train pts, 200 epochs of per-sample SGD, random init, median of 5 seeds, test = 20 unseen points in [-1,1]
 
 model              lr params   loss@10   loss@50  loss@end  ep<0.1   test mse    worst     sec  div
-KAN             0.001     70   15.9660    1.6716   0.02778     116    0.08678   0.3678   0.154  0/5
-micrograd MLP   0.001     67    6.6746    0.7063   0.09072     155    0.08939   0.3231   1.326  0/5
-KAN             0.003     70    8.6255    0.1109   0.01510      55    0.02601   0.0768   0.175  0/5
-micrograd MLP   0.003     67    1.2218    0.1716   0.08308      78    0.06765   0.1810   3.070  0/5
-KAN              0.01     70    0.2998    0.0454   0.01226      27    0.01070   0.1577   0.149  0/5
-micrograd MLP    0.01     67    0.3747    0.0834   0.06189      41    0.07265   0.1281   1.642  0/5
-KAN              0.02     70    0.4624    0.0291   0.02556      18    0.01247   0.0648   0.161  0/5
-micrograd MLP    0.02     67    0.6313    0.2355   0.07537      21    0.03673  17.2888   1.233  0/5
+KAN             0.001     70   21.9953    1.1580   0.06017     131    0.05212   0.0649   0.068  0/5
+micrograd MLP   0.001     67    6.6746    0.7063   0.09072     155    0.08939   0.3231   0.514  0/5
+KAN             0.003     70    7.3735    0.0906   0.02814      47    0.02252   0.0447   0.067  0/5
+micrograd MLP   0.003     67    1.2218    0.1716   0.08308      78    0.06765   0.1810   0.517  0/5
+KAN              0.01     70    0.1814    0.0368   0.01689      16    0.01355   0.0243   0.068  0/5
+micrograd MLP    0.01     67    0.3747    0.0834   0.06189      41    0.07265   0.1281   0.514  0/5
+KAN              0.02     70    0.0994    0.0344   0.00988      10    0.00713   0.0093   0.069  0/5
+micrograd MLP    0.02     67    0.6313    0.2355   0.07537      21    0.03673  17.2888   0.515  0/5
 
 best lr per model (lowest final train loss):
-  KAN            lr=0.01  loss=0.01226  test mse=0.01070  time=0.149s
-  micrograd MLP  lr=0.01  loss=0.06189  test mse=0.07265  time=1.642s
+  KAN            lr=0.02  loss=0.00988  test mse=0.00713  time=0.069s
+  micrograd MLP  lr=0.01  loss=0.06189  test mse=0.07265  time=0.514s
 ```
 
 Columns: `loss@N` = median mean-squared training loss after N epochs, `ep<0.1` = median first epoch with
@@ -443,18 +491,17 @@ loss below 0.1, `test mse` = median test error, `worst` = worst test error over 
 
 ### Reading the results
 
-* **Accuracy.** At each model's best learning rate (0.01) the KAN reaches a final training loss of
-  0.0123 vs 0.0619 (about 5× lower) and a test MSE of 0.0107 vs 0.0727 (about 7× lower). It also
-  gets below loss 0.1 sooner (epoch 27 vs 41). At the other three learning rates the KAN also ends
-  with the lower training loss.
+* **Accuracy.** At each model's best learning rate (KAN 0.02, MLP 0.01) the KAN reaches a final
+  training loss of 0.0099 vs 0.0619 (about 6× lower) and a test MSE of 0.0071 vs 0.0727 (about 10×
+  lower). It also gets below loss 0.1 sooner (epoch 10 vs 41). At all four learning rates the KAN
+  ends with the lower training loss.
 * **Why it suits this task.** The target is a smooth low-degree polynomial, which cubic B-splines
   represent very naturally, whereas a ReLU MLP (micrograd's default activation) must stitch it
   together from straight pieces.
 * **Stability.** No run diverged for either model. micrograd at `lr=0.02` had one bad seed with a
-  test error of 17.3; the KAN's worst case at that rate was 0.065. The KAN's worst case at
-  `lr=0.01` (0.158) shows the seed-to-seed variance is real, so look at the medians *and* the
-  `worst` column.
-* **Speed (read with care).** The KAN trains about 11× faster (0.149 s vs 1.642 s), but this
+  test error of 17.3; the KAN's worst case at that rate was 0.0093, and over all four learning
+  rates its worst case was 0.065 (`lr=0.001`). Look at the medians *and* the `worst` column.
+* **Speed (read with care).** The KAN trains about 7× faster (0.069 s vs 0.514 s), but this
   compares compiled C++ against interpreted Python, so most of the gap is language overhead, not
   architecture. The accuracy comparison is the meaningful one.
 * **Scope of the claim.** This is a tiny 1-D regression with 9 training points. It shows that the
@@ -504,8 +551,7 @@ loss below 0.1, `test mse` = median test error, `worst` = worst test error over 
 2. **Inputs outside `[a, b]`** get no spline contribution (only the SiLU term) on the inner layer. (as expected)
 3. **Not implemented** from the paper: grid refinement/extension, sparsification and pruning,
    symbolic regression, multiple outputs.
-4. **Performance.** `coxDeBoor` is a plain recursion without caching and `dB` re-evaluates it; fine for
-   this size, not for large grids.
+4. **Performance.** `coxDeBoor` keeps a table for the last `x` only, so a `Spline` object is not thread-safe, and `train` still loops over all `G+k` weights of an edge although only `k+1` of them get a non-zero update.
 
 ---
 
@@ -519,6 +565,11 @@ loss below 0.1, `test mse` = median test error, `worst` = worst test error over 
   V. I. Arnold (1957), *On functions of three variables*.
 * **B-splines:** C. de Boor (1972), *On calculating with B-splines*, J. Approx. Theory 6, 50–62;
   M. G. Cox (1972), *The numerical evaluation of B-splines*, IMA J. Appl. Math. 10, 134–149.
+* **Triangular evaluation of the basis (used in `coxDeBoor`):** L. Piegl, W. Tiller (1997),
+  *The NURBS Book*, 2nd ed., Springer, Chapter 2, Section 2.5 (Algorithms A2.1 `FindSpan` and
+  A2.2 `BasisFuns`). https://doi.org/10.1007/978-3-642-59223-2_2
+* **Same scheme, classic reference:** C. de Boor, *A Practical Guide to Splines*, Springer
+  (1978; revised ed. 2001).
 * **SiLU:** S. Elfwing, E. Uchibe, K. Doya (2018), *Sigmoid-weighted linear units for neural network
   function approximation in reinforcement learning*, Neural Networks 107.
 * **Autograd design:** Andrej Karpathy, *micrograd*. https://github.com/karpathy/micrograd
