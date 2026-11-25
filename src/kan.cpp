@@ -20,7 +20,8 @@ KAN::KAN(int G, int k, double a, double b, NeuronPool &npool)
 
 void KAN::compute_first_layer(const std::vector<std::vector<double>> &w_in, const std::vector<double> &c1)
 {
-    std::vector<std::vector<double>> Bvalues;
+    std::vector<std::vector<double>> Bvalues, dBvalues;
+    std::vector<int> first;
     std::vector<Neuron *> params;
 
     for (size_t i = 0; i < npool.pool.size(); i++)
@@ -28,29 +29,34 @@ void KAN::compute_first_layer(const std::vector<std::vector<double>> &w_in, cons
         Neuron &x = npool.pool[i];
         params.push_back(&x);
 
-        std::vector<double> temp;
-        for (size_t j = 0; j < spline.G + spline.k; j++)
+        int s = spline.span(x.data);
+        first.push_back(s - spline.k);
+
+        std::vector<double> temp(spline.G + spline.k, 0.0), dtemp(spline.G + spline.k, 0.0);
+        for (size_t j = s - spline.k; j <= s; j++)
         {
-            double B = spline.coxDeBoor(j, spline.k, x.data);
-            temp.push_back(B);
+            temp[j] = spline.coxDeBoor(j, spline.k, x.data);
+            dtemp[j] = dB(spline, j, x.data);
         }
         Bvalues.push_back(temp);
+        dBvalues.push_back(dtemp);
     }
 
     size_t idx = 0;
     for (size_t i = 0; i < params.size(); i++)
     {
+        double sp = silu_prime(params[i]->data);
         for (size_t j = 0; j < 2 * params.size() + 1; j++, idx++)
         {
             Neuron &phi = silu(*params[i]);
             double s = phi.data;
-            double d = c1[idx] * silu_prime((*params[i]).data);
+            double d = c1[idx] * sp;
             phi.data *= c1[idx];
 
-            for (size_t k = 0; k < spline.G + spline.k; k++)
+            for (int k = first[i]; k <= first[i] + spline.k; k++)
             {
                 phi.data += w_in[idx][k] * Bvalues[i][k];
-                d += w_in[idx][k] * dB(spline, k, (*params[i]).data);
+                d += w_in[idx][k] * dBvalues[i][k];
             }
             phi.label = "Φ" + std::to_string(i) + "," + std::to_string(j);
             phi.local_grad = {d, s};
@@ -101,7 +107,7 @@ void KAN::update_outer_grid(const std::vector<std::vector<double>> &X,
     }
 
     double w = hi - lo;
-    if (w < 1e-6)                        // degenerate: all values equal
+    if (w < 1e-6)
     {
         double mid = 0.5 * (lo + hi);
         lo = mid - 0.5;
@@ -124,13 +130,14 @@ void KAN::compute_outer_layer(const std::vector<std::vector<double>> &w_out, con
         phi.data *= c2[q];
 
         std::vector<double> B(nb);
-        for (size_t m = 0; m < nb; m++)
+        int outer_span = outer_spline.span(h.data);
+        for (int m = outer_span - spline.k; m <= outer_span; m++)
         {
             B[m] = outer_spline.coxDeBoor(m, spline.k, h.data);
             phi.data += w_out[q][m] * B[m];
             d += w_out[q][m] * dB(outer_spline, m, h.data);
         }
-        phi.op = "spline";                      
+        phi.op = "spline";
         phi.local_grad = {d, s};
         phi.local_grad.insert(phi.local_grad.end(), B.begin(), B.end());
         outer_layer.push_back(&phi);
